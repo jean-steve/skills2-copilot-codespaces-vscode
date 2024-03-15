@@ -1,77 +1,83 @@
 // create web server    
-var http = require('http');
-var fs = require('fs');
-var path = require('path');
-var url = require('url');
-var comments = require('./comments');
-var mime = require('mime');
-var cache = {}; 
+// require express
+const express = require('express');
+// create an express application
+const app = express();
+// require body-parser
+const bodyParser = require('body-parser');
+// require express-handlebars
+const handlebars = require('express-handlebars');
+// require path
+const path = require('path');
+// require mongoose
+const mongoose = require('mongoose');
+// require Comment model
+const Comment = require('./models/comment');
+// require Post model
+const Post = require('./models/post');
+// require method-override
+const methodOverride = require('method-override');
+// require express-session
+const session = require('express-session');
+// require connect-flash
+const flash = require('connect-flash');
+// require passport
+const passport = require('passport');
+// require passport-local
+const LocalStrategy = require('passport-local').Strategy;
+// require User model
+const User = require('./models/user');
 
-// send 404 error
-function send404(response) {
-    response.writeHead(404, {'Content-Type': 'text/plain'});
-    response.write('Error 404: resource not found.');
-    response.end();
-}
+// connect to MongoDB
+mongoose.connect('mongodb://localhost:27017/comments', {useNewUrlParser: true, useUnifiedTopology: true})
+  .then(() => {
+    console.log('Connected to MongoDB');
+  })
+  .catch(err => {
+    console.log('Error connecting to MongoDB', err);
+  });
 
-// send file data
-function sendFile(response, filePath, fileContents) {
-    response.writeHead(200, {'Content-Type': mime.lookup(path.basename(filePath))});
-    response.end(fileContents);
-}
+// use body-parser
+app.use(bodyParser.urlencoded({extended: false}));
+// use method-override
+app.use(methodOverride('_method'));
+// use express-session
+app.use(session({
+  secret: 'keyboard cat',
+  resave: false,
+  saveUninitialized: true
+}));
+// use connect-flash
+app.use(flash());
+// use passport
+app.use(passport.initialize());
+app.use(passport.session());
+// use express-handlebars
+app.engine('handlebars', handlebars({defaultLayout: 'main'}));
+app.set('view engine', 'handlebars');
+// set public folder
+app.use(express.static(path.join(__dirname, 'public')));
 
-// serve static files
-function serveStatic(response, cache, absPath) {
-    if (cache[absPath]) {
-        sendFile(response, absPath, cache[absPath]);
-    } else {
-        fs.exists(absPath, function(exists) {
-            if (exists) {
-                fs.readFile(absPath, function(err, data) {
-                    if (err) {
-                        send404(response);
-                    } else {
-                        cache[absPath] = data;
-                        sendFile(response, absPath, data);
-                    }
-                });
-            } else {
-                send404(response);
-            }
-        });
-    }
-}
+// configure passport
+passport.use(new LocalStrategy(
+  function(username, password, done) {
+    User.findOne({username: username}, function(err, user) {
+      if (err) {
+        return done(err);
+      }
+      if (!user) {
+        return done(null, false, {message: 'Incorrect username.'});
+      }
+      if (user.password !== password) {
+        return done(null, false, {message: 'Incorrect password.'});
+      }
+      return done(null, user);
+    });
+  }
+));
 
-// create http server
-var server = http.createServer(function(request, response) {
-    var filePath = false;
-    if (request.url == '/') {
-        filePath = 'public/index.html';
-    } else {
-        filePath = 'public' + request.url;
-    }
-    var absPath = './' + filePath;
-    serveStatic(response, cache, absPath);
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
 });
 
-server.listen(3000, function() {
-    console.log("Server listening on port 3000.");
-});
-
-// create socket.io server
-var io = require('socket.io').listen(server);
-io.set('log level', 1);
-
-// define how the server should respond to each connection
-io.sockets.on('connection', function(socket) {
-    // when the client emits 'message', this listens and executes
-    socket.on('message', function(message) {
-        socket.broadcast.emit('message', message);
-    });
-    // when the client emits 'user', this listens and executes
-    socket.on('user', function(user) {
-        socket.broadcast.emit('user', user);
-    });
-    // when the client emits 'comment', this listens and executes
-    socket.on('comment', function(comment) {
-        comments.addComment(comment);
+passport
