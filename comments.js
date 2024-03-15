@@ -5,7 +5,7 @@ var path = require('path');
 var url = require('url');
 var comments = require('./comments');
 var mime = require('mime');
-var cache = {};
+var cache = {}; 
 
 // send 404 error
 function send404(response) {
